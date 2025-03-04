@@ -17,7 +17,7 @@ import axios from "axios";
 
 function App() {
   const [appearance, setAppearance] = useState("dark");
-  const apiEndpoint = "https://medalsapi.azurewebsites.net/api/country";
+  const apiEndpoint = "/api/api/country";
   const [countries, setCountries] = useState([]);
   const medals = useRef([
     { id: 1, name: "gold", color: "#FFD700" },
