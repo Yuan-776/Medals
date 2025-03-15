@@ -1,7 +1,10 @@
 import { useEffect, useState, useRef } from "react";
-import Country from "./components/Country";
+import Country from "./components/Country"; 
 import Login from "./components/Login";
 import Logout from "./components/Logout";
+import NewCountry from "./components/NewCountry"; 
+import CustomAlertDialog from "./components/CustomAlertDialog"; 
+import ConfirmDialog from "./components/ConfirmDialog"; 
 import {
   Theme,
   Button,
@@ -10,11 +13,11 @@ import {
   Badge,
   Container,
   Grid,
+  Tooltip,
 } from "@radix-ui/themes";
 import { SunIcon, MoonIcon } from "@radix-ui/react-icons";
 import "@radix-ui/themes/styles.css";
 import "./App.css";
-import NewCountry from "./components/NewCountry";
 import axios from "axios";
 import { getUser } from "./Utils.js";
 import { HubConnectionBuilder } from "@microsoft/signalr";
@@ -33,6 +36,22 @@ function App() {
     canPatch: false,
     canDelete: false,
   });
+  const [alertDialog, setAlertDialog] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+  });
+  
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+    confirmLabel: "Yes",
+    cancelLabel: "Cancel",
+    confirmColor: "blue"
+  });
+  
   const medals = useRef([
     { id: 1, name: "gold", color: "#FFD700" },
     { id: 2, name: "silver", color: "#C0C0C0" },
@@ -42,6 +61,40 @@ function App() {
   // latestCountries is a ref variable to countries (state)
   // this is needed to access state variable in useEffect w/o dependency
   latestCountries.current = countries;
+
+  const showAlert = (title, message) => {
+    setAlertDialog({
+      isOpen: true,
+      title,
+      message,
+    });
+  };
+
+  const closeAlert = () => {
+    setAlertDialog({
+      ...alertDialog,
+      isOpen: false,
+    });
+  };
+  
+  const showConfirmation = (title, message, onConfirm, confirmLabel = "Yes", cancelLabel = "Cancel", confirmColor = "blue") => {
+    setConfirmDialog({
+      isOpen: true,
+      title,
+      message,
+      onConfirm,
+      confirmLabel,
+      cancelLabel,
+      confirmColor
+    });
+  };
+  
+  const closeConfirmation = () => {
+    setConfirmDialog({
+      ...confirmDialog,
+      isOpen: false,
+    });
+  };
 
   useEffect(() => {
     // initial data loaded here
@@ -144,7 +197,7 @@ function App() {
   }
   async function handleAdd(name) {
     try {
-      await axios.post(
+      const response = await axios.post(
         apiEndpoint,
         {
           name: name,
@@ -155,21 +208,23 @@ function App() {
           },
         }
       );
+      
+      showAlert("Success", `${name} has been successfully added.`);
     } catch (ex) {
       if (
         ex.response &&
         (ex.response.status === 401 || ex.response.status === 403)
       ) {
-        alert("You are not authorized to complete this request");
+        showAlert("Authorization Error", "You are not authorized to complete this request");
       } else if (ex.response) {
         console.log(ex.response);
       } else {
         console.log("Request failed");
       }
     }
-    console.log("ADD");
   }
-  async function handleDelete(countryId) {
+  
+  async function performDelete(countryId) {
     const originalCountries = countries;
     setCountries(countries.filter((c) => c.id !== countryId));
     try {
@@ -190,7 +245,7 @@ function App() {
           ex.response &&
           (ex.response.status === 401 || ex.response.status === 403)
         ) {
-          alert("You are not authorized to complete this request");
+          showAlert("Authorization Error", "You are not authorized to complete this request");
         } else if (ex.response) {
           console.log(ex.response);
         } else {
@@ -199,6 +254,21 @@ function App() {
       }
     }
   }
+  
+  function handleDelete(countryId) {
+    const country = countries.find(c => c.id === countryId);
+    const countryName = country ? country.name : "this country";
+    
+    showConfirmation(
+      "Confirm Deletion",
+      `Are you sure you want to delete ${countryName}? This action cannot be undone.`,
+      () => performDelete(countryId),
+      "Delete",  
+      "Cancel",  
+      "red"      
+    );
+  }
+  
   function handleIncrement(countryId, medalName) {
     handleUpdate(countryId, medalName, 1);
   }
@@ -228,6 +298,11 @@ function App() {
         country[medal.name].saved_value = country[medal.name].page_value;
       }
     });
+    
+    if (jsonPatch.length === 0) {
+      return;
+    }
+    
     console.log(
       `json patch for id: ${countryId}: ${JSON.stringify(jsonPatch)}`
     );
@@ -240,6 +315,8 @@ function App() {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
       });
+      
+      showAlert("Success", `Changes to ${country.name} have been saved.`);
     } catch (ex) {
       if (ex.response && ex.response.status === 404) {
         // country already deleted
@@ -250,11 +327,11 @@ function App() {
         ex.response &&
         (ex.response.status === 401 || ex.response.status === 403)
       ) {
-        alert("You are not authorized to complete this request");
+        showAlert("Authorization Error", "You are not authorized to complete this request");
         // to simplify, I am reloading the page to restore "saved" values
         window.location.reload(false);
       } else {
-        alert("An error occurred while updating");
+        showAlert("Error", "An error occurred while updating");
         setCountries(originalCountries);
       }
     }
@@ -277,13 +354,16 @@ function App() {
       });
       const encoded = resp.data.token;
       localStorage.setItem("token", encoded);
-      setUser(getUser(encoded));
+      const userData = getUser(encoded);
+      setUser(userData);
+      
+      showAlert("Login Successful", `Welcome, ${userData.name}!`);
     } catch (ex) {
       if (
         ex.response &&
         (ex.response.status === 401 || ex.response.status === 400)
       ) {
-        alert("Login failed");
+        showAlert("Login Failed", "Invalid username or password. Please try again.");
       } else if (ex.response) {
         console.log(ex.response);
       } else {
@@ -291,7 +371,7 @@ function App() {
       }
     }
   }
-  function handleLogout() {
+  async function performLogout() {
     localStorage.removeItem("token");
     setUser({
       name: null,
@@ -300,7 +380,20 @@ function App() {
       canPatch: false,
       canDelete: false,
     });
+    showAlert("Logged Out", "You have been successfully logged out.");
   }
+  
+  function handleLogout() {
+    showConfirmation(
+      "Confirm Logout",
+      "Are you sure you want to log out?",
+      performLogout,
+      "Yes",     
+      "Cancel",  
+      "blue"    
+    );
+  }
+  
   function getAllMedalsTotal() {
     let sum = 0;
     // use medal count displayed in the web page for medal count totals
@@ -312,13 +405,34 @@ function App() {
 
   return (
     <Theme appearance={appearance}>
-      <Button
-        onClick={toggleAppearance}
-        style={{ position: "fixed", bottom: 20, right: 20, zIndex: 100 }}
-        variant="ghost"
-      >
-        {appearance === "dark" ? <MoonIcon /> : <SunIcon />}
-      </Button>
+      <Tooltip content={appearance === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}>
+        <Button
+          onClick={toggleAppearance}
+          style={{ position: "fixed", bottom: 20, right: 20, zIndex: 100 }}
+          variant="ghost"
+        >
+          {appearance === "dark" ? <MoonIcon /> : <SunIcon />}
+        </Button>
+      </Tooltip>
+      
+      <CustomAlertDialog 
+        isOpen={alertDialog.isOpen}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        onClose={closeAlert}
+      />
+      
+      <ConfirmDialog 
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        onClose={closeConfirmation}
+        onConfirm={confirmDialog.onConfirm}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        confirmColor={confirmDialog.confirmColor}
+      />
+      
       {user.authenticated ? (
         <Logout onLogout={handleLogout} />
       ) : (
@@ -332,7 +446,7 @@ function App() {
           </Badge>
         </Heading>
         {user.canPost && <NewCountry onAdd={handleAdd} />}
-              </Flex>
+      </Flex>
       <Container className="bg"></Container>
       <Grid pt="2" gap="2" className="grid-container">
         {countries
